@@ -1,7 +1,6 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore/lite";
 
-// Sirf apna asli config yahan rehne dena
 const firebaseConfig = {
   apiKey: "AIzaSyDWFpqOtRYW-Pw1tm9iVB1UUMOIBRh3Rfg",
   authDomain: "universal-lyrics-database.firebaseapp.com",
@@ -11,8 +10,8 @@ const firebaseConfig = {
   appId: "1:962151933726:web:c385965d56a7fe29bdcb0f"
 };
 
-// Initialize Firebase
+// Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Export Firestore (Isse ReferenceError theek ho jayega)
+// Export lightweight Firestore Lite instance (drastically reduces extension bundle size)
 export const db = getFirestore(app);

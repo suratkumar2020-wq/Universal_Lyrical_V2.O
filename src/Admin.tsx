@@ -1,7 +1,7 @@
 // src/Admin.tsx - Complete Lyrics Manager (Search, Edit, Add)
 import { useState, useEffect } from 'react';
 import { db } from './firebaseConfig'; 
-import { doc, setDoc, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, query, orderBy } from 'firebase/firestore/lite';
 import { ArrowLeft, Send, Loader2, Search, Edit3, Plus, Music } from 'lucide-react';
 
 interface AdminProps { onBack: () => void; }
