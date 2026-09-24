@@ -1,7 +1,10 @@
 {
   "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "server.ts" },
+    { "source": "/api/lyrics", "destination": "/api/lyrics" },
+    { "source": "/api/generate", "destination": "/api/generate" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
