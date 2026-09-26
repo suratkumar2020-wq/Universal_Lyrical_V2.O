@@ -167,6 +167,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [userScrolled, setUserScrolled] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  const [pinUnsupported, setPinUnsupported] = useState(false);
   // windowId of this floating window (set once, used to toggle alwaysOnTop)
   const windowIdRef = useRef<number | null>(null);
 
@@ -238,12 +239,19 @@ export default function App() {
     setLyrics([]);
 
     try {
-      // 1. PRIORITY 1: Check Firebase Verified DB (1.5s timeout — fast fail)
+      // 1. PRIORITY 1: Check Firebase Verified DB
+      // Use AbortController so the underlying IPv6 TCP stream is actually torn down
+      // (not just ignored) when we hit the 5-second timeout.
       const songId = `${resolvedArtist.toLowerCase().trim().replace(/ /g, '_')}_${resolvedSong.toLowerCase().trim().replace(/ /g, '_')}`;
       try {
         const docRef = doc(db, "verified_lyrics", songId);
-        const firebaseTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+        const abortCtrl = new AbortController();
+        const abortTimer = setTimeout(() => abortCtrl.abort(), 5000);
+        const firebaseTimeout = new Promise<null>((resolve) => {
+          abortCtrl.signal.addEventListener('abort', () => resolve(null), { once: true });
+        });
         const docSnapResult = await Promise.race([getDoc(docRef), firebaseTimeout]);
+        clearTimeout(abortTimer);
         const docSnap = docSnapResult;
 
         if (docSnap && typeof docSnap === 'object' && 'exists' in docSnap && (docSnap as any).exists()) {
@@ -493,35 +501,50 @@ export default function App() {
     try {
       const c = (globalThis as any)?.chrome;
       if (c?.runtime?.sendMessage) {
-        c.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: false });
+        c.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: false }, () => {});
         window.close();
       }
     } catch { /* ignore */ }
   };
 
-  // Pin = keep window in front of all other windows.
-  // From popup  → pop out immediately as a pinned floating window.
-  // From floating window → toggle alwaysOnTop via the background worker.
+  // Pin = keep window always on top of all other windows.
+  // From popup  → pop out as a pinned floating window (background does create→update).
+  // From floating window → toggle alwaysOnTop via SET_ALWAYS_ON_TOP, then READ BACK
+  //   the actual state — Chrome silently ignores alwaysOnTop on some OS/builds.
   const handleTogglePin = useCallback(() => {
     try {
       const c = (globalThis as any)?.chrome;
       if (!c?.runtime?.sendMessage) return;
 
       if (!isWindow) {
-        // Not yet a floating window — pop out pinned
-        c.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: true }, () => {});
+        // Not yet a floating window — pop out pinned.
+        // background.js does create() then update(alwaysOnTop:true) and returns actual state.
+        c.runtime.sendMessage(
+          { type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: true },
+          (resp: any) => {
+            // New window's mount effect reads actual state via getCurrent.
+            void resp;
+          }
+        );
         window.close();
         return;
       }
 
       const nextPinned = !isPinned;
 
-      // Get our own window ID the first time
       const doToggle = (winId: number) => {
         c.runtime.sendMessage(
           { type: 'SET_ALWAYS_ON_TOP', windowId: winId, enabled: nextPinned },
           (resp: any) => {
-            if (resp?.success) setIsPinned(nextPinned);
+            if (chrome.runtime?.lastError) return;
+            if (resp?.success) {
+              // Use the ACTUAL state Chrome reports — not what we asked for
+              const actual = !!resp.alwaysOnTop;
+              setIsPinned(actual);
+              // If we asked to pin but Chrome refused (unsupported OS/build)
+              if (nextPinned && !actual) setPinUnsupported(true);
+              else setPinUnsupported(false);
+            }
           }
         );
       };
@@ -529,7 +552,6 @@ export default function App() {
       if (windowIdRef.current) {
         doToggle(windowIdRef.current);
       } else {
-        // Discover our own window ID (chrome.windows.getCurrent)
         if (c.windows?.getCurrent) {
           c.windows.getCurrent((win: any) => {
             if (win?.id) {
@@ -540,21 +562,29 @@ export default function App() {
         }
       }
     } catch { /* ignore */ }
+  // eslint-disable-next-line no-unused-vars
   }, [isWindow, isPinned]);
 
-  // On mount inside a floating window: discover our window ID & sync pin state
+  // On mount inside a floating window: discover window ID and sync actual pin state.
+  // We also retry after 300ms because Chrome sometimes reports alwaysOnTop=false
+  // for the first tick right after window creation before the OS applies it.
   useEffect(() => {
     if (!isWindow) return;
-    try {
-      const c = (globalThis as any)?.chrome;
-      if (!c?.windows?.getCurrent) return;
-      c.windows.getCurrent((win: any) => {
-        if (win?.id) {
-          windowIdRef.current = win.id;
-          setIsPinned(!!win.alwaysOnTop);
-        }
-      });
-    } catch { /* ignore */ }
+    const syncPinState = (delay = 0) => {
+      setTimeout(() => {
+        try {
+          const c = (globalThis as any)?.chrome;
+          if (!c?.windows?.getCurrent) return;
+          c.windows.getCurrent((win: any) => {
+            if (!win?.id) return;
+            windowIdRef.current = win.id;
+            setIsPinned(!!win.alwaysOnTop);
+          });
+        } catch { /* ignore */ }
+      }, delay);
+    };
+    syncPinState(0);   // immediate read
+    syncPinState(350); // retry after Chrome settles
   }, [isWindow]);
 
   const handleCopyLyrics = () => {
@@ -607,13 +637,27 @@ export default function App() {
           style={{ background: `linear-gradient(to bottom, ${theme.glow}, transparent)` }}
         />
       </div>
-      {/* 2px pro hairline directly under the OS titlebar — the "edge bar"
-          that follows the music theme with a soft glow + smooth transition.
-          Pulses gently with the beat while playing. */}
+      {/* 2px pro hairline directly under the OS titlebar */}
       <div
         className={`seamless-theme-hairline relative z-50 h-[2px] w-full shrink-0 ${isPlaying ? 'bg-breathe' : ''}`}
         style={{ backgroundColor: theme.color, boxShadow: `0 0 12px ${theme.glow}, 0 1px 8px ${theme.glow}` }}
       />
+
+      {/* Pin-unsupported toast — shown when OS/Chrome ignores alwaysOnTop */}
+      <AnimatePresence>
+        {pinUnsupported && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            onAnimationComplete={() => setTimeout(() => setPinUnsupported(false), 3000)}
+            className="absolute top-14 left-1/2 -translate-x-1/2 z-[200] px-3 py-1.5 rounded-xl bg-zinc-800/95 border border-white/10 backdrop-blur-xl shadow-2xl text-[10px] font-bold text-white/70 whitespace-nowrap"
+          >
+            ⚠️ Pin not supported on this OS / Chrome build
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Seamless Header — transparent, no bezel/border, drag-to-move in floating window */}
       <header className={`min-h-[52px] pl-4 pr-3 py-2 flex items-center justify-between gap-2 z-50 relative bg-gradient-to-b from-black/50 to-transparent backdrop-blur-md min-w-0 max-w-full ${isWindow ? 'drag-region' : ''}`}>
