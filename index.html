@@ -3,11 +3,71 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Universal Lyrics Pro - Real-Time AI Synced Lyrics</title>
-    <link rel="icon" type="image/png" href="/icons/icon32.png" />
+    <meta name="theme-color" id="theme-color-meta" content="#080808" />
+    <meta name="color-scheme" content="dark" />
+    <title>Universal Lyrics Pro</title>
+    <link rel="icon" type="image/png" href="./icons/icon32.png" />
+    <style>
+      /* Critical: give the extension popup a real size BEFORE React/CSS loads.
+         Without this Chrome shrink-wraps the popup into a tiny square. */
+      html, body {
+        width: 400px;
+        height: 600px;
+        min-width: 400px;
+        min-height: 600px;
+        margin: 0;
+        padding: 0;
+        background: #080808;
+        overflow: hidden;
+      }
+      #root {
+        width: 400px;
+        height: 600px;
+        min-width: 400px;
+        min-height: 600px;
+        overflow: hidden;
+      }
+      /* Floating window mode (?window=true) fills the whole window fluidly.
+          Native OS titlebar can't be removed by extensions, so we keep the
+          document <title> short + dynamic (set from React) so it reads like
+          Spotify ("Track — Artist"). Inner UI below is zero-bezel seamless. */
+      body.window-mode, body.window-mode #root {
+        width: 100%;
+        height: 100vh;
+        min-width: 0;
+        min-height: 0;
+        max-width: none;
+        max-height: none;
+      }
+      #popup-crash {
+        display: none;
+        padding: 24px;
+        font-family: sans-serif;
+        color: #fff;
+        font-size: 13px;
+      }
+    </style>
+    <script>
+      if (window.location.search.indexOf('window=true') !== -1) {
+        document.addEventListener('DOMContentLoaded', function () {
+          document.body.classList.add('window-mode');
+        });
+      }
+      // If the bundle fails to mount (crash), show a message instead of a tiny blank square
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          var crash = document.getElementById('popup-crash');
+          if (root && root.children.length === 0 && crash) {
+            crash.style.display = 'block';
+          }
+        }, 2500);
+      });
+    </script>
   </head>
   <body class="bg-[#080808] text-white antialiased selection:bg-white/20">
     <div id="root"></div>
+    <div id="popup-crash">Couldn't start the player UI. Please reload the extension or check for updates.</div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

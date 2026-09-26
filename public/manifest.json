@@ -5,14 +5,18 @@
   "description": "AI-powered real-time synchronized lyrics & Hinglish translations for Spotify, YouTube, and JioSaavn.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "windows"
   ],
   "host_permissions": [
     "*://*.spotify.com/*",
     "*://*.youtube.com/*",
     "*://*.jiosaavn.com/*",
     "https://lrclib.net/*",
-    "https://newuniversal-lyrics-pro.vercel.app/*"
+    "https://newuniversal-lyrics-pro.vercel.app/*",
+    "https://firestore.googleapis.com/*",
+    "https://*.googleapis.com/*",
+    "https://*.firebaseio.com/*"
   ],
   "action": {
     "default_title": "Universal Lyrics Pro",
@@ -32,6 +36,9 @@
   },
   "background": {
     "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://lrclib.net https://newuniversal-lyrics-pro.vercel.app https://firestore.googleapis.com https://*.googleapis.com https://*.firebaseio.com;"
   },
   "content_scripts": [
     {

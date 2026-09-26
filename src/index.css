@@ -12,14 +12,40 @@
   html, body {
     margin: 0;
     padding: 0;
-    width: 100%;
-    height: 100%;
+    /* Fixed popup size: Chrome shrink-wraps popups with no explicit size
+       into a tiny square. 400x600 fits under the 800x600 popup limits. */
+    width: 400px;
+    height: 600px;
+    min-width: 400px;
+    min-height: 600px;
+    max-width: 400px;
+    max-height: 600px;
     background-color: #080808;
     color: #f4f4f5;
     font-family: var(--font-sans);
     overflow: hidden;
     user-select: none;
     -webkit-font-smoothing: antialiased;
+  }
+  body.window-mode, body.window-mode #root {
+    width: 100%;
+    height: 100vh;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+  }
+  body.window-mode {
+    min-width: 260px;
+  }
+  #root {
+    width: 400px;
+    height: 600px;
+    min-width: 400px;
+    min-height: 600px;
+    max-width: 400px;
+    max-height: 600px;
+    overflow: hidden;
   }
 }
 
@@ -73,6 +99,74 @@
   background-size: 200% 100%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* Seamless pro top-tint: color cross-fades via inline style transition.
+   This sits directly under the native OS titlebar so the edge feels like
+   Spotify — zero bezel, glow follows the active platform/accent. */
+.seamless-theme-bg,
+.seamless-theme-glow,
+.seamless-theme-hairline {
+  transition: background-color 0.9s ease, box-shadow 0.9s ease, opacity 0.9s ease;
+}
+
+/* Drag region for floating window: lets the custom top area feel like a
+   native Spotify titlebar (drag to move). Buttons inside must opt out. */
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Fluid type safety: never let long titles push content off-screen */
+.fluid-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Beat-reactive living background (transparent, behind lyrics) ---- */
+@keyframes orbDriftA {
+  0%, 100% { transform: translate(-15%, -8%) scale(1); }
+  50% { transform: translate(15%, 12%) scale(1.25); }
+}
+@keyframes orbDriftB {
+  0%, 100% { transform: translate(12%, 10%) scale(1.15); }
+  50% { transform: translate(-14%, -10%) scale(0.9); }
+}
+@keyframes auroraSway {
+  0%, 100% { transform: translateX(-12%) rotate(-8deg) scaleY(1); opacity: 0.5; }
+  50% { transform: translateX(12%) rotate(8deg) scaleY(1.35); opacity: 1; }
+}
+@keyframes particleRise {
+  0% { transform: translateY(20px) scale(1); opacity: 0; }
+  15% { opacity: 0.9; }
+  100% { transform: translateY(-260px) scale(0.4); opacity: 0; }
+}
+@keyframes spectrumBounce {
+  0%, 100% { transform: scaleY(0.25); opacity: 0.35; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes beatBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+.bg-orb-a { animation: orbDriftA 11s ease-in-out infinite; }
+.bg-orb-b { animation: orbDriftB 15s ease-in-out infinite; }
+.bg-aurora { animation: auroraSway 9s ease-in-out infinite; }
+.bg-breathe { animation: beatBreathe 1.1s ease-in-out infinite; }
+.bg-paused .bg-orb-a,
+.bg-paused .bg-orb-b,
+.bg-paused .bg-aurora,
+.bg-paused .bg-breathe,
+.bg-paused .bg-spectrum-bar,
+.bg-paused .bg-particle {
+  animation-play-state: paused;
+  opacity: 0.25;
 }
 
 /* Custom Mini Scrollbar */

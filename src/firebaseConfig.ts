@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore/lite";
 
 const firebaseConfig = {
@@ -10,8 +10,8 @@ const firebaseConfig = {
   appId: "1:962151933726:web:c385965d56a7fe29bdcb0f"
 };
 
-// Initialize Firebase App
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase App (guarded so the popup never crashes if config/network fails)
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 // Export lightweight Firestore Lite instance (drastically reduces extension bundle size)
 export const db = getFirestore(app);

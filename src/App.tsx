@@ -6,7 +6,7 @@ import { doc, getDoc } from 'firebase/firestore/lite';
 declare const chrome: any;
 import {
   MoreVertical, Heart, Home, Settings, Flag, RefreshCw, Cpu,
-  ExternalLink, Search, Copy, Check, Sparkles, X, ChevronDown
+  ExternalLink, Search, Copy, Check, Sparkles, X, ChevronDown, Pin, PinOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -42,6 +42,113 @@ const GlowBeat = ({ color, isPlaying }: { color: string; isPlaying: boolean }) =
   </div>
 );
 
+/* Living beat-reactive background — transparent layers behind lyrics.
+   - Drifting orbs + aurora breathe continuously (faster/brighter on play)
+   - Central pulse kicks on every beat tick (active lyric line + tempo clock)
+   - Bottom spectrum + rising particles dance only while isPlaying
+   All low-opacity + blurred so lyrics stay fully readable. */
+const BeatBackground = ({
+  color, glow, secondary, isPlaying, beatPulse,
+}: { color: string; glow: string; secondary: string; isPlaying: boolean; beatPulse: number }) => {
+  const particles = useMemo(() => (
+    Array.from({ length: 12 }).map((_, i) => ({
+      left: `${(i * 83 + 7) % 100}%`,
+      size: 2 + ((i * 7) % 4),
+      delay: `${(i * 0.9) % 6}s`,
+      duration: `${5 + ((i * 13) % 5)}s`,
+    }))
+  ), []);
+
+  const bars = useMemo(() => (
+    Array.from({ length: 28 }).map((_, i) => ({
+      delay: `${(i % 7) * 0.09}s`,
+      duration: `${0.5 + ((i * 17) % 40) / 100}s`,
+      height: 18 + ((i * 29) % 42),
+    }))
+  ), []);
+
+  return (
+    <div className={`absolute inset-0 z-0 overflow-hidden pointer-events-none ${isPlaying ? '' : 'bg-paused'}`}>
+      {/* Drifting transparent orbs — theme tinted */}
+      <div
+        className="bg-orb-a seamless-theme-glow absolute -top-16 -left-20 w-72 h-72 rounded-full blur-[80px] opacity-25"
+        style={{ backgroundColor: color }}
+      />
+      <div
+        className="bg-orb-b seamless-theme-glow absolute top-1/3 -right-24 w-80 h-80 rounded-full blur-[90px] opacity-20"
+        style={{ backgroundColor: secondary }}
+      />
+      <div
+        className="bg-orb-a seamless-theme-glow absolute bottom-10 -left-16 w-64 h-64 rounded-full blur-[70px] opacity-[0.14]"
+        style={{ backgroundColor: color, animationDelay: '-6s' }}
+      />
+
+      {/* Aurora ribbons — ultra transparent diagonal wash */}
+      <div
+        className="bg-aurora absolute top-1/4 -left-1/4 w-[150%] h-24 blur-[50px] opacity-20"
+        style={{ background: `linear-gradient(90deg, transparent, ${glow}, transparent)` }}
+      />
+      <div
+        className="bg-aurora absolute top-1/2 -left-1/4 w-[150%] h-16 blur-[40px] opacity-[0.12]"
+        style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)`, animationDelay: '-4.5s' }}
+      />
+
+      {/* Beat kick pulse — scales on every beat tick while playing */}
+      <motion.div
+        key={isPlaying ? beatPulse : 'paused'}
+        initial={{ scale: 0.9, opacity: 0.1 }}
+        animate={isPlaying
+          ? { scale: [0.9, 1.18, 1], opacity: [0.12, 0.32, 0.16] }
+          : { scale: 1, opacity: 0.1 }}
+        transition={isPlaying ? { duration: 0.55, ease: 'easeOut' } : { duration: 0.6 }}
+        className="absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full blur-[60px]"
+        style={{ background: `radial-gradient(circle, ${glow} 0%, transparent 70%)` }}
+      />
+
+      {/* Rising particles — float up only while playing */}
+      {isPlaying && particles.map((p, i) => (
+        <span
+          key={i}
+          className="bg-particle absolute bottom-16 rounded-full"
+          style={{
+            left: p.left,
+            width: p.size,
+            height: p.size,
+            backgroundColor: color,
+            boxShadow: `0 0 8px ${color}`,
+            animation: `particleRise ${p.duration} linear ${p.delay} infinite`,
+          }}
+        />
+      ))}
+
+      {/* Bottom spectrum — transparent bars bouncing to the beat */}
+      <div className="absolute inset-x-0 bottom-0 h-[74px] flex items-end justify-center gap-[5px] px-6 opacity-40">
+        {bars.map((b, i) => (
+          <span
+            key={i}
+            className="bg-spectrum-bar w-[3px] rounded-full origin-bottom"
+            style={{
+              height: b.height,
+              background: `linear-gradient(to top, ${color}, ${secondary})`,
+              boxShadow: isPlaying ? `0 0 8px ${glow}` : 'none',
+              opacity: isPlaying ? undefined : 0.15,
+              animation: isPlaying ? `spectrumBounce ${b.duration} ease-in-out ${b.delay} infinite` : 'none',
+              transform: isPlaying ? undefined : 'scaleY(0.2)',
+            }}
+          />
+        ))}
+        <div
+          className="absolute inset-x-0 bottom-0 h-[74px] pointer-events-none"
+          style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)' }}
+        />
+      </div>
+
+      {/* Vignette keeps lyrics readable over all motion */}
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.5) 100%)' }} />
+    </div>
+  );
+};
+
 export default function App() {
   const [platform, setPlatform] = useState<Platform>('spotify');
   const [song, setSong] = useState('');
@@ -59,17 +166,49 @@ export default function App() {
   const [searchArtist, setSearchArtist] = useState('');
   const [copied, setCopied] = useState(false);
   const [userScrolled, setUserScrolled] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  // windowId of this floating window (set once, used to toggle alwaysOnTop)
+  const windowIdRef = useRef<number | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<any>(null);
+  const scrollRafRef = useRef<number>(0);
   // Refs to hold latest song/artist without causing effect re-registration
   const songRef = useRef(song);
   const artistRef = useRef(artist);
+  // Ref for currentTime so the message handler never triggers a render for
+  // sub-0.5s deltas (we batch updates and only setState when meaningful)
+  const currentTimeRef = useRef(0);
+  const pendingTimeRef = useRef<number | null>(null);
+  const timeFlushId = useRef<any>(null);
   useEffect(() => { songRef.current = song; }, [song]);
   useEffect(() => { artistRef.current = artist; }, [artist]);
 
   const theme = THEMES[platform] || THEMES.spotify;
   const isWindow = typeof window !== 'undefined' && window.location.search.includes('window=true');
+
+  // Beat clock: extension has no raw audio feed, so we synthesize a musical
+  // pulse — ~110 BPM interval while playing, re-triggered on lyric change.
+  // BeatBackground uses this to kick its glow + spectrum like a visualizer.
+  const [beatPulse, setBeatPulse] = useState(0);
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => setBeatPulse((v) => v + 1), 545);
+    return () => clearInterval(id);
+  }, [isPlaying, song]);
+
+  // Professional native titlebar: keep it short like Spotify.
+  // Native OS chrome can't be made frameless from an extension,
+  // so we sync it: "Song — Artist" while playing, app name when idle,
+  // plus <meta name="theme-color"> so supporting shells tint to match.
+  useEffect(() => {
+    try {
+      const base = 'Universal Lyrics Pro';
+      document.title = song ? `${song}${artist ? ` — ${artist}` : ''}` : base;
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', theme.bg);
+    } catch { /* ignore */ }
+  }, [song, artist, theme.bg]);
 
   // Helper to parse LRC string into LyricLine array
   const parseAndSetLRC = useCallback((lrcString: string): LyricLine[] => {
@@ -90,17 +229,20 @@ export default function App() {
       .filter(Boolean) as LyricLine[];
   }, []);
 
-  const fetchLyrics = useCallback(async (targetSong = song, targetArtist = artist) => {
-    if (!targetSong) return;
+  const fetchLyrics = useCallback(async (targetSong?: string, targetArtist?: string) => {
+    // Always read latest from refs so this callback never needs song/artist in deps
+    const resolvedSong = targetSong ?? songRef.current;
+    const resolvedArtist = targetArtist ?? artistRef.current;
+    if (!resolvedSong) return;
     setIsLoading(true);
     setLyrics([]);
 
     try {
-      // 1. PRIORITY 1: Check Firebase Verified DB (4-second timeout to prevent IPv6 hangs)
-      const songId = `${targetArtist.toLowerCase().trim().replace(/ /g, '_')}_${targetSong.toLowerCase().trim().replace(/ /g, '_')}`;
+      // 1. PRIORITY 1: Check Firebase Verified DB (1.5s timeout — fast fail)
+      const songId = `${resolvedArtist.toLowerCase().trim().replace(/ /g, '_')}_${resolvedSong.toLowerCase().trim().replace(/ /g, '_')}`;
       try {
         const docRef = doc(db, "verified_lyrics", songId);
-        const firebaseTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
+        const firebaseTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
         const docSnapResult = await Promise.race([getDoc(docRef), firebaseTimeout]);
         const docSnap = docSnapResult;
 
@@ -132,15 +274,15 @@ export default function App() {
             return;
           }
         } else if (!docSnap) {
-          console.warn("Firebase timed out — skipping to LRCLIB.");
+          // Firebase timed out — skip silently
         }
       } catch (err) {
-        console.warn("Firebase query skipped:", err);
+        // Firebase query skipped
       }
 
       // 2. PRIORITY 2: Check LRCLIB directly
       try {
-        const lrcUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(targetArtist)}&track_name=${encodeURIComponent(targetSong)}`;
+        const lrcUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(resolvedArtist)}&track_name=${encodeURIComponent(resolvedSong)}`;
         const lrcRes = await fetch(lrcUrl);
         if (lrcRes.ok) {
           const lrcData = await lrcRes.json();
@@ -153,13 +295,13 @@ export default function App() {
             }
           }
         }
-      } catch (err) {
-        console.warn("LRCLIB query skipped:", err);
+      } catch {
+        // LRCLIB query skipped
       }
 
       // 3. PRIORITY 3: Cloud Backend (Vercel Serverless / AI Fallback)
       try {
-        const backendUrl = `https://newuniversal-lyrics-pro.vercel.app/api/lyrics?song=${encodeURIComponent(targetSong)}&artist=${encodeURIComponent(targetArtist)}`;
+        const backendUrl = `https://newuniversal-lyrics-pro.vercel.app/api/lyrics?song=${encodeURIComponent(resolvedSong)}&artist=${encodeURIComponent(resolvedArtist)}`;
         const res = await fetch(backendUrl);
         if (res.ok) {
           const data = await res.json();
@@ -189,81 +331,119 @@ export default function App() {
             }
           }
         }
-      } catch (err) {
-        console.warn("Backend API query skipped:", err);
+      } catch {
+        // Backend API query skipped
       }
-    } catch (err) {
-      console.error("Lyrics Fetch Error:", err);
+    } catch {
+      // Lyrics fetch error
     } finally {
       setIsLoading(false);
     }
-  }, [song, artist, parseAndSetLRC]);
+  }, [parseAndSetLRC]); // No song/artist deps — uses refs, so never stale
+
+  // Flush batched currentTime update to React state (called at most once per rAF frame)
+  const flushPendingTime = useCallback(() => {
+    timeFlushId.current = null;
+    if (pendingTimeRef.current !== null) {
+      setCurrentTime(pendingTimeRef.current);
+      pendingTimeRef.current = null;
+    }
+  }, []);
 
   // Extension Message & Storage Sync
   useEffect(() => {
-    if (typeof chrome !== 'undefined' && chrome.storage) {
+    let handleRuntimeMessage: ((message: any) => void) | null = null;
+    let handleStorageChange: ((changes: any, areaName: string) => void) | null = null;
+    try {
+      const c = (globalThis as any)?.chrome;
+      if (!c?.storage?.local || !c?.runtime?.onMessage) return;
       // 1. Initial Storage Fetch
-      chrome.storage.local.get(['currentTrack', 'currentPlaybackTime'], (result) => {
-        if (result.currentTrack) {
-          setSong(result.currentTrack.song || '');
-          setArtist(result.currentTrack.artist || '');
-          if (result.currentTrack.platform) setPlatform(result.currentTrack.platform);
-        }
-        if (typeof result.currentPlaybackTime === 'number') {
-          setCurrentTime(result.currentPlaybackTime);
-        }
-      });
+      try {
+        c.storage.local.get(['currentTrack', 'currentPlaybackTime'], (result: any) => {
+          try {
+            if (c?.runtime?.lastError) return; // extension reloaded mid-read
+            if (result?.currentTrack) {
+              setSong(result.currentTrack.song || '');
+              setArtist(result.currentTrack.artist || '');
+              if (result.currentTrack.platform) setPlatform(result.currentTrack.platform);
+            }
+            if (typeof result?.currentPlaybackTime === 'number') {
+              currentTimeRef.current = result.currentPlaybackTime;
+              setCurrentTime(result.currentPlaybackTime);
+            }
+          } catch { /* ignore */ }
+        });
+      } catch { /* storage unavailable (e.g. dev server) */ }
 
-      // 2. Real-Time Message Listener (Zero Disk Latency)
-      // Uses refs so this handler is never stale and never needs re-registration
-      const handleRuntimeMessage = (message: any) => {
-        if (message?.type === 'PLAYBACK_TICK') {
-          if (typeof message.currentTime === 'number') {
-            setCurrentTime(message.currentTime);
-          }
-          if (typeof message.isPlaying === 'boolean') {
-            setIsPlaying(message.isPlaying);
-          }
-          // Compare against ref (always latest) instead of stale closure variable
-          if (message.song && message.song !== songRef.current) {
-            setSong(message.song);
-            setArtist(message.artist || '');
-            if (message.platform) setPlatform(message.platform);
+      // 2. Real-Time Message Listener
+      // Uses refs so this handler is never stale and never needs re-registration.
+      // currentTime updates are BATCHED via rAF to avoid a React render on every
+      // timeupdate event (~4 times/sec) — we only re-render when the frame paints.
+      handleRuntimeMessage = (message: any) => {
+        if (message?.type !== 'PLAYBACK_TICK') return;
+
+        if (typeof message.isPlaying === 'boolean') {
+          setIsPlaying(message.isPlaying);
+        }
+
+        // Track changed — update immediately
+        if (message.song && message.song !== songRef.current) {
+          setSong(message.song);
+          setArtist(message.artist || '');
+          if (message.platform) setPlatform(message.platform);
+        }
+
+        // Time update — batch via rAF so we render at most once per display frame
+        if (typeof message.currentTime === 'number') {
+          currentTimeRef.current = message.currentTime;
+          pendingTimeRef.current = message.currentTime;
+          if (!timeFlushId.current) {
+            timeFlushId.current = requestAnimationFrame(flushPendingTime);
           }
         }
       };
 
-      chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+      c.runtime.onMessage.addListener(handleRuntimeMessage);
 
-      // 3. Storage Change Listener (Fallback)
-      const handleStorageChange = (changes: any, areaName: string) => {
-        if (areaName === 'local') {
-          if (changes.currentTrack?.newValue) {
-            const val = changes.currentTrack.newValue;
-            setSong(val.song || '');
-            setArtist(val.artist || '');
-            if (val.platform) setPlatform(val.platform);
-          }
-          if (changes.currentPlaybackTime?.newValue !== undefined) {
-            setCurrentTime(changes.currentPlaybackTime.newValue);
+      // 3. Storage Change Listener (Fallback for when popup was closed)
+      handleStorageChange = (changes: any, areaName: string) => {
+        if (areaName !== 'local') return;
+        if (changes.currentTrack?.newValue) {
+          const val = changes.currentTrack.newValue;
+          setSong(val.song || '');
+          setArtist(val.artist || '');
+          if (val.platform) setPlatform(val.platform);
+        }
+        if (changes.currentPlaybackTime?.newValue !== undefined) {
+          const t = changes.currentPlaybackTime.newValue;
+          currentTimeRef.current = t;
+          pendingTimeRef.current = t;
+          if (!timeFlushId.current) {
+            timeFlushId.current = requestAnimationFrame(flushPendingTime);
           }
         }
       };
-      chrome.storage.onChanged.addListener(handleStorageChange);
+      c.storage.onChanged.addListener(handleStorageChange);
 
       return () => {
-        chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
-        chrome.storage.onChanged.removeListener(handleStorageChange);
+        try {
+          if (handleRuntimeMessage) c.runtime.onMessage.removeListener(handleRuntimeMessage);
+          if (handleStorageChange) c.storage.onChanged.removeListener(handleStorageChange);
+          if (timeFlushId.current) cancelAnimationFrame(timeFlushId.current);
+        } catch { /* ignore */ }
       };
-    }
-  }, []); // Empty deps: listener registered once, refs keep it fresh
+    } catch { /* non-extension context (dev server) — run without chrome APIs */ }
+    return undefined;
+  }, [flushPendingTime]); // stable: flushPendingTime is memoized
 
   // Auto-fetch on song change
   useEffect(() => {
     if (song) {
       fetchLyrics(song, artist);
     }
-  }, [song, artist, fetchLyrics]);
+  // fetchLyrics is stable (no song/artist dep); song/artist trigger the fetch
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song, artist]);
 
   // Calculate current active line
   const activeIndex = useMemo(() => {
@@ -277,43 +457,112 @@ export default function App() {
     return idx;
   }, [lyrics, currentTime]);
 
-  // Smooth Jitter-Free Auto Scroll
+  // Smooth Jitter-Free Auto Scroll — uses rAF to avoid layout thrashing
   useEffect(() => {
     if (activeTab !== 'home' || userScrolled) return;
 
-    const activeEl = document.getElementById(`lyric-${activeIndex}`);
-    const container = scrollRef.current;
-    if (activeEl && container) {
+    // Cancel any pending scroll frame before scheduling a new one
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const activeEl = document.getElementById(`lyric-${activeIndex}`);
+      const container = scrollRef.current;
+      if (!activeEl || !container) return;
+
       const containerHeight = container.clientHeight;
       const targetTop = activeEl.offsetTop - (containerHeight / 2) + (activeEl.clientHeight / 2);
-
-      container.scrollTo({
-        top: Math.max(0, targetTop),
-        behavior: 'smooth'
-      });
-    }
+      const currentScroll = container.scrollTop;
+      // Only scroll if the line is more than 80px away from ideal — avoids micro-jitter
+      if (Math.abs(currentScroll - Math.max(0, targetTop)) > 80) {
+        container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+      }
+    });
   }, [activeIndex, activeTab, userScrolled]);
 
-  // User manual scroll detection
-  const handleScroll = () => {
+  // User manual scroll detection — memoized to prevent inline function on each render
+  const handleScroll = useCallback(() => {
     setUserScrolled(true);
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
     scrollTimeoutRef.current = setTimeout(() => {
       setUserScrolled(false);
     }, 3500);
-  };
+  }, []);
 
   const handlePopOut = () => {
-    if (typeof chrome !== 'undefined' && chrome.runtime) {
-      chrome.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW' });
-      window.close();
-    }
+    try {
+      const c = (globalThis as any)?.chrome;
+      if (c?.runtime?.sendMessage) {
+        c.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: false });
+        window.close();
+      }
+    } catch { /* ignore */ }
   };
+
+  // Pin = keep window in front of all other windows.
+  // From popup  → pop out immediately as a pinned floating window.
+  // From floating window → toggle alwaysOnTop via the background worker.
+  const handleTogglePin = useCallback(() => {
+    try {
+      const c = (globalThis as any)?.chrome;
+      if (!c?.runtime?.sendMessage) return;
+
+      if (!isWindow) {
+        // Not yet a floating window — pop out pinned
+        c.runtime.sendMessage({ type: 'OPEN_FLOATING_WINDOW', alwaysOnTop: true }, () => {});
+        window.close();
+        return;
+      }
+
+      const nextPinned = !isPinned;
+
+      // Get our own window ID the first time
+      const doToggle = (winId: number) => {
+        c.runtime.sendMessage(
+          { type: 'SET_ALWAYS_ON_TOP', windowId: winId, enabled: nextPinned },
+          (resp: any) => {
+            if (resp?.success) setIsPinned(nextPinned);
+          }
+        );
+      };
+
+      if (windowIdRef.current) {
+        doToggle(windowIdRef.current);
+      } else {
+        // Discover our own window ID (chrome.windows.getCurrent)
+        if (c.windows?.getCurrent) {
+          c.windows.getCurrent((win: any) => {
+            if (win?.id) {
+              windowIdRef.current = win.id;
+              doToggle(win.id);
+            }
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }, [isWindow, isPinned]);
+
+  // On mount inside a floating window: discover our window ID & sync pin state
+  useEffect(() => {
+    if (!isWindow) return;
+    try {
+      const c = (globalThis as any)?.chrome;
+      if (!c?.windows?.getCurrent) return;
+      c.windows.getCurrent((win: any) => {
+        if (win?.id) {
+          windowIdRef.current = win.id;
+          setIsPinned(!!win.alwaysOnTop);
+        }
+      });
+    } catch { /* ignore */ }
+  }, [isWindow]);
 
   const handleCopyLyrics = () => {
     if (!lyrics.length) return;
     const text = lyrics.map(l => (isHinglish && l.translated ? `${l.translated} (${l.original})` : l.original)).join('\n');
-    navigator.clipboard.writeText(text);
+    try {
+      navigator.clipboard?.writeText(text)?.catch?.(() => {});
+    } catch { /* clipboard unavailable */ }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -336,26 +585,49 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col w-full h-screen bg-[#080808] text-white font-sans overflow-hidden select-none relative" style={{ backgroundColor: theme.bg }}>
-      {/* Background Ambient Glow */}
+    <div
+      className={`flex flex-col text-white font-sans overflow-hidden select-none relative mx-auto min-w-0 max-w-full ${
+        isWindow ? 'w-full h-screen min-h-0' : 'w-[400px] h-[600px] min-w-[400px] min-h-[600px] max-w-[400px] max-h-[600px]'
+      }`}
+      style={{ backgroundColor: theme.bg, transition: 'background-color 0.9s ease' }}
+    >
+      {/* Living beat background — transparent motion behind lyrics (see BeatBackground).
+          Lyrics stay readable via low opacity + blur + vignette. */}
+      <BeatBackground
+        color={theme.color}
+        glow={theme.glow}
+        secondary={theme.secondary}
+        isPlaying={isPlaying}
+        beatPulse={beatPulse + activeIndex}
+      />
+      {/* Spotify-style seamless top wash (kept above beat bg for edge tint) */}
+      <div className="absolute inset-x-0 top-0 h-32 pointer-events-none z-[1] overflow-hidden">
+        <div
+          className="seamless-theme-glow absolute inset-x-0 top-0 h-24 opacity-25"
+          style={{ background: `linear-gradient(to bottom, ${theme.glow}, transparent)` }}
+        />
+      </div>
+      {/* 2px pro hairline directly under the OS titlebar — the "edge bar"
+          that follows the music theme with a soft glow + smooth transition.
+          Pulses gently with the beat while playing. */}
       <div
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-80 rounded-full blur-[100px] pointer-events-none opacity-20 transition-all duration-1000"
-        style={{ backgroundColor: theme.color }}
+        className={`seamless-theme-hairline relative z-50 h-[2px] w-full shrink-0 ${isPlaying ? 'bg-breathe' : ''}`}
+        style={{ backgroundColor: theme.color, boxShadow: `0 0 12px ${theme.glow}, 0 1px 8px ${theme.glow}` }}
       />
 
-      {/* Modern Header */}
-      <header className="h-13 px-4 flex items-center justify-between z-50 bg-black/40 backdrop-blur-xl border-b border-white/5 relative">
-        <div className="flex items-center gap-2.5">
-          <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: theme.color, boxShadow: `0 0 8px ${theme.color}` }} />
-          <span className="text-[10px] font-black tracking-[3px] uppercase text-white/70">{platform}</span>
+      {/* Seamless Header — transparent, no bezel/border, drag-to-move in floating window */}
+      <header className={`min-h-[52px] pl-4 pr-3 py-2 flex items-center justify-between gap-2 z-50 relative bg-gradient-to-b from-black/50 to-transparent backdrop-blur-md min-w-0 max-w-full ${isWindow ? 'drag-region' : ''}`}>
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+          <div className="w-2 h-2 rounded-full animate-pulse shrink-0 seamless-theme-glow" style={{ backgroundColor: theme.color, boxShadow: `0 0 8px ${theme.color}` }} />
+          <span className="text-[10px] font-black tracking-[3px] uppercase text-white/70 truncate fluid-title">{platform}</span>
           {isPlaying && (
-            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-white/10 text-white/80 uppercase tracking-widest">
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-white/10 text-white/80 uppercase tracking-widest shrink-0 hidden min-[300px]:inline-block">
               Live
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-3 text-white/40">
+        <div className={`flex items-center gap-1.5 min-[360px]:gap-3 text-white/40 shrink-0 ${isWindow ? 'no-drag' : ''}`}>
           <button
             onClick={() => setShowSearch(!showSearch)}
             title="Search song manually"
@@ -381,6 +653,35 @@ export default function App() {
               <ExternalLink className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {/* ── Pin button: keeps this window always-on-top ── */}
+          <button
+            id="pin-toggle-btn"
+            onClick={handleTogglePin}
+            title={isPinned ? 'Unpin window' : 'Pin on top of all tabs'}
+            className={`p-1 transition-all duration-200 rounded-md relative group ${
+              isPinned
+                ? 'text-white'
+                : 'text-white/40 hover:text-white'
+            }`}
+            style={isPinned ? {
+              color: theme.color,
+              filter: `drop-shadow(0 0 6px ${theme.color})`,
+            } : {}}
+          >
+            {isPinned ? (
+              <PinOff className="w-3.5 h-3.5" />
+            ) : (
+              <Pin className="w-3.5 h-3.5" />
+            )}
+            {/* Active glow ring */}
+            {isPinned && (
+              <span
+                className="absolute inset-0 rounded-md pointer-events-none"
+                style={{ boxShadow: `0 0 10px ${theme.glow}`, opacity: 0.5 }}
+              />
+            )}
+          </button>
 
           <div className="w-[1px] h-3 bg-white/10" />
 
@@ -442,26 +743,26 @@ export default function App() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="px-4 py-3 bg-zinc-900/90 backdrop-blur-xl border-b border-white/10 flex flex-col gap-2 z-40 overflow-hidden"
+            className="px-4 py-3 bg-zinc-900/90 backdrop-blur-xl border-b border-white/10 flex flex-col gap-2 z-40 overflow-hidden min-w-0 max-w-full"
           >
-            <div className="flex gap-2">
+            <div className="flex flex-col min-[360px]:flex-row gap-2 min-w-0 max-w-full">
               <input
                 type="text"
                 placeholder="Song name..."
                 value={searchSong}
                 onChange={(e) => setSearchSong(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/40 outline-none focus:border-white/30"
+                className="flex-1 min-w-0 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/40 outline-none focus:border-white/30"
               />
               <input
                 type="text"
                 placeholder="Artist (optional)..."
                 value={searchArtist}
                 onChange={(e) => setSearchArtist(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/40 outline-none focus:border-white/30"
+                className="flex-1 min-w-0 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-white/40 outline-none focus:border-white/30"
               />
               <button
                 type="submit"
-                className="px-3 py-2 rounded-xl text-xs font-bold text-black bg-white active:scale-95 transition-transform"
+                className="px-3 py-2 rounded-xl text-xs font-bold text-black bg-white active:scale-95 transition-transform shrink-0"
               >
                 Find
               </button>
@@ -474,27 +775,34 @@ export default function App() {
       <main
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-5 py-4 space-y-3 pb-28 no-scrollbar scroll-smooth relative"
+        className="flex-1 overflow-y-auto overflow-x-hidden px-4 min-[360px]:px-5 py-4 space-y-3 pb-28 no-scrollbar scroll-smooth relative z-10 min-w-0 max-w-full"
       >
         {activeTab === 'home' ? (
           <>
-            {/* Song Header & Beat Glow */}
-            <section className="pt-1 pb-3 flex items-center gap-3.5 bg-gradient-to-b from-black/20 to-transparent sticky top-0 z-30 backdrop-blur-sm -mx-5 px-5">
+            {/* Song Header & Beat Glow — fluid: shrinks art, truncates text, never clips */}
+            <section className="pt-1 pb-3 flex items-center gap-2.5 min-[360px]:gap-3.5 bg-gradient-to-b from-black/20 to-transparent sticky top-0 z-30 backdrop-blur-sm -mx-4 min-[360px]:-mx-5 px-4 min-[360px]:px-5 min-w-0 max-w-full overflow-hidden">
               <div className="relative group shrink-0">
-                <div className="w-13 h-13 rounded-2xl overflow-hidden shadow-2xl border border-white/10 relative z-10 bg-zinc-900 flex items-center justify-center">
+                <div className="w-11 h-11 min-[360px]:w-[52px] min-[360px]:h-[52px] rounded-2xl overflow-hidden shadow-2xl border border-white/10 relative z-10 bg-zinc-900 flex items-center justify-center shrink-0">
                   <GlowBeat color={theme.color} isPlaying={isPlaying} />
                 </div>
                 <div
-                  className="absolute inset-0 rounded-2xl blur-lg opacity-40 transition-opacity"
+                  className="absolute inset-0 rounded-2xl blur-lg opacity-40 seamless-theme-glow"
                   style={{ backgroundColor: theme.color }}
                 />
               </div>
 
-              <div className="flex flex-col min-w-0 flex-1">
-                <h1 className="text-[17px] font-black text-white truncate tracking-tight">
+              <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+                <h1
+                  title={song || "Universal Lyrics Pro"}
+                  className="text-[15px] min-[360px]:text-[17px] font-black text-white truncate tracking-tight min-w-0 max-w-full"
+                >
                   {song || "Universal Lyrics Pro"}
                 </h1>
-                <p className="text-[12px] font-bold truncate opacity-70" style={{ color: theme.secondary }}>
+                <p
+                  title={artist || "Play music on Spotify or YouTube"}
+                  className="text-[11px] min-[360px]:text-[12px] font-bold truncate opacity-70 min-w-0 max-w-full"
+                  style={{ color: theme.secondary }}
+                >
                   {artist || "Play music on Spotify or YouTube"}
                 </p>
               </div>
@@ -502,7 +810,7 @@ export default function App() {
               <button
                 onClick={handleCopyLyrics}
                 title="Copy lyrics"
-                className="p-2 text-white/40 hover:text-white transition-colors shrink-0"
+                className="p-2 text-white/40 hover:text-white transition-colors shrink-0 -mr-1"
               >
                 {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
               </button>
@@ -527,26 +835,26 @@ export default function App() {
                     key={line.id}
                     id={`lyric-${index}`}
                     onClick={() => setCurrentTime(line.time > 0 ? line.time : currentTime)}
-                    className={`relative p-4 transition-all duration-300 rounded-[20px] cursor-pointer border ${
+                    className={`relative p-3.5 min-[360px]:p-4 transition-all duration-300 rounded-[20px] cursor-pointer border min-w-0 max-w-full overflow-hidden ${
                       status === 'active'
-                        ? 'bg-white/[0.06] border-white/15 shadow-xl scale-[1.02]'
+                        ? 'bg-white/[0.06] border-white/15 shadow-xl scale-[1.01] min-[360px]:scale-[1.02]'
                         : 'border-transparent hover:bg-white/[0.02]'
                     }`}
                   >
                     <p
-                      className={`font-black leading-snug tracking-tight transition-all duration-300 ${
+                      className={`font-black leading-snug tracking-tight transition-all duration-300 min-w-0 max-w-full break-words whitespace-pre-wrap ${
                         status === 'active'
-                          ? 'text-[21px] text-white'
+                          ? 'text-[18px] min-[360px]:text-[21px] text-white'
                           : status === 'passed'
-                          ? 'text-[17px] opacity-35 text-white/70'
-                          : 'text-[17px] opacity-20 text-white/50'
+                          ? 'text-[15px] min-[360px]:text-[17px] opacity-35 text-white/70'
+                          : 'text-[15px] min-[360px]:text-[17px] opacity-20 text-white/50'
                       }`}
                     >
                       {primaryText}
                     </p>
 
                     {secondaryText && status === 'active' && (
-                      <p className="text-[13px] font-bold mt-1.5 opacity-80" style={{ color: theme.secondary }}>
+                      <p className="text-[12px] min-[360px]:text-[13px] font-bold mt-1.5 opacity-80 min-w-0 max-w-full break-words whitespace-pre-wrap" style={{ color: theme.secondary }}>
                         {secondaryText}
                       </p>
                     )}
@@ -611,26 +919,26 @@ export default function App() {
 
       {/* Floating Hinglish Toggle & Resume Scroll Pill (Home only) */}
       {activeTab === 'home' && (
-        <div className="absolute bottom-20 left-0 right-0 flex justify-center items-center gap-2 z-40 pointer-events-none">
+        <div className="absolute bottom-20 left-0 right-0 flex justify-center items-center gap-2 z-40 pointer-events-none px-4 min-w-0 max-w-full">
           {userScrolled && (
             <button
               onClick={() => setUserScrolled(false)}
-              className="pointer-events-auto flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/15 bg-black/80 backdrop-blur-2xl text-[10px] font-bold text-white hover:bg-black transition-all shadow-xl active:scale-95"
+              className="pointer-events-auto flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/15 bg-black/80 backdrop-blur-2xl text-[10px] font-bold text-white hover:bg-black transition-all shadow-xl active:scale-95 shrink-0 max-w-[45vw] truncate"
             >
-              <ChevronDown className="w-3.5 h-3.5" />
-              <span>Sync View</span>
+              <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Sync View</span>
             </button>
           )}
 
           <button
             onClick={() => setIsHinglish(!isHinglish)}
-            className="pointer-events-auto flex items-center gap-2.5 px-5 py-2.5 rounded-full border border-white/10 bg-black/60 backdrop-blur-2xl hover:bg-black/80 transition-all active:scale-95 shadow-2xl"
+            className="pointer-events-auto flex items-center gap-2.5 px-4 min-[360px]:px-5 py-2.5 rounded-full border border-white/10 bg-black/60 backdrop-blur-2xl hover:bg-black/80 transition-all active:scale-95 shadow-2xl shrink-0 max-w-[80vw] overflow-hidden"
           >
             <div
-              className={`w-2 h-2 rounded-full ${isHinglish ? 'animate-pulse' : ''}`}
+              className={`w-2 h-2 rounded-full shrink-0 seamless-theme-glow ${isHinglish ? 'animate-pulse' : ''}`}
               style={{ backgroundColor: isHinglish ? theme.color : '#666' }}
             />
-            <span className="text-[10px] font-black tracking-[2px] text-white/90 uppercase">
+            <span className="text-[10px] font-black tracking-[2px] text-white/90 uppercase truncate">
               {isHinglish ? 'Hinglish ON' : 'Native Script'}
             </span>
           </button>
@@ -638,7 +946,7 @@ export default function App() {
       )}
 
       {/* Sleek Bottom Navigation Bar */}
-      <footer className="h-16 flex items-center justify-around bg-black/60 backdrop-blur-2xl border-t border-white/[0.05] z-50 shrink-0">
+      <footer className="h-16 min-h-[64px] flex items-center justify-around bg-black/60 backdrop-blur-2xl border-t border-white/[0.05] z-50 shrink-0 min-w-0 max-w-full px-4">
         <button
           onClick={() => setActiveTab('home')}
           className={`flex flex-col items-center gap-1 cursor-pointer transition-all ${
